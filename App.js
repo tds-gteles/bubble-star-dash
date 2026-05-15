@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 
-const GAME_SECONDS = 60;
+const GAME_SECONDS = 75;
 const TICK_MS = 50;
 const PLAYER_RADIUS = 25;
 
@@ -95,7 +95,7 @@ const gameTypes = [
     categoryIndex
   }))
 ];
-const LEVEL_COUNT = 30;
+const LEVEL_COUNT = 40;
 const categoryRotation = [0, 1, 2, 3, 4];
 const rewardNames = ["Bubble Badge", "Star Pop", "Word Spark", "Rainbow Ring", "Moon Sticker"];
 const DEFAULT_DIFFICULTY_ID = "normal";
@@ -106,12 +106,12 @@ const difficultyModes = [
     title: "Easy",
     color: colors.mint,
     hearts: 4,
-    targetDelta: -2,
-    secondsDelta: 10,
+    targetDelta: -1,
+    secondsDelta: 12,
     cloudCapDelta: -1,
-    spawnDelta: 0.25,
-    speedDelta: -5,
-    matchChance: 0.74
+    spawnDelta: 0.18,
+    speedDelta: -4,
+    matchChance: 0.7
   },
   {
     id: "normal",
@@ -119,12 +119,12 @@ const difficultyModes = [
     title: "Normal",
     color: colors.yellow,
     hearts: 3,
-    targetDelta: 0,
+    targetDelta: 1,
     secondsDelta: 0,
     cloudCapDelta: 0,
-    spawnDelta: 0,
-    speedDelta: 0,
-    matchChance: 0.58
+    spawnDelta: -0.04,
+    speedDelta: 1,
+    matchChance: 0.54
   },
   {
     id: "hard",
@@ -132,12 +132,12 @@ const difficultyModes = [
     title: "Hard",
     color: colors.coral,
     hearts: 2,
-    targetDelta: 3,
-    secondsDelta: -8,
-    cloudCapDelta: 1,
-    spawnDelta: -0.22,
-    speedDelta: 5,
-    matchChance: 0.48
+    targetDelta: 4,
+    secondsDelta: -6,
+    cloudCapDelta: 2,
+    spawnDelta: -0.28,
+    speedDelta: 7,
+    matchChance: 0.44
   }
 ];
 
@@ -278,11 +278,11 @@ function makeLevelConfig(
     selectedCategoryIndex >= 0
       ? selectedCategoryIndex
       : categoryRotation[levelIndex % categoryRotation.length];
-  const baseTarget = 5 + Math.floor(levelIndex * 1.15);
-  const baseSeconds = 54 - Math.floor(levelIndex / 4) * 2;
-  const baseCloudCap = 4 + Math.min(4, Math.floor(levelIndex / 4));
-  const baseSpawn = 1.75 - levelIndex * 0.035;
-  const baseSpeed = Math.min(11, levelIndex * 0.55);
+  const baseTarget = 7 + Math.floor(levelIndex * 0.85);
+  const baseSeconds = 74 - Math.floor(levelIndex / 6) * 2;
+  const baseCloudCap = 5 + Math.min(5, Math.floor(levelIndex / 5));
+  const baseSpawn = 1.58 - levelIndex * 0.026;
+  const baseSpeed = Math.min(14, levelIndex * 0.46);
 
   return {
     levelNumber: safeLevel,
@@ -290,12 +290,12 @@ function makeLevelConfig(
     difficultyId: difficulty.id,
     difficultyLabel: difficulty.label,
     difficultyColor: difficulty.color,
-    targetScore: clamp(baseTarget + difficulty.targetDelta, 3, 32),
-    seconds: clamp(baseSeconds + difficulty.secondsDelta, 26, 70),
+    targetScore: clamp(baseTarget + difficulty.targetDelta, 5, 44),
+    seconds: clamp(baseSeconds + difficulty.secondsDelta, 45, 90),
     hearts: difficulty.hearts,
-    cloudCap: clamp(baseCloudCap + difficulty.cloudCapDelta, 3, 10),
-    spawnBase: clamp(baseSpawn + difficulty.spawnDelta, 0.55, 2.25),
-    speedBonus: clamp(baseSpeed + difficulty.speedDelta, -5, 18),
+    cloudCap: clamp(baseCloudCap + difficulty.cloudCapDelta, 4, 11),
+    spawnBase: clamp(baseSpawn + difficulty.spawnDelta, 0.58, 2.1),
+    speedBonus: clamp(baseSpeed + difficulty.speedDelta, -4, 21),
     matchChance: difficulty.matchChance,
     rewardName: rewardNames[levelIndex % rewardNames.length]
   };
@@ -525,14 +525,14 @@ function advanceGame(prev, bounds) {
   });
 
   const baseCloudCap = prev.cloudCap || 5;
-  const cloudCap = Math.min(9, baseCloudCap + Math.min(2, Math.floor(elapsed / 20)));
+  const cloudCap = Math.min(11, baseCloudCap + Math.min(2, Math.floor(elapsed / 24)));
   while (spawnTimer <= 0) {
     if (clouds.length < cloudCap) {
       clouds.push(
         makeCloud(safeBounds, nextId++, elapsed, category, false, prev.speedBonus || 0, prev.matchChance || 0.58)
       );
     }
-    spawnTimer += Math.max(0.68, (prev.spawnBase || 1.65) - elapsed * 0.004);
+    spawnTimer += Math.max(0.58, (prev.spawnBase || 1.55) - elapsed * 0.0045);
   }
 
   const matchCount = clouds.filter((cloud) => cloud.isMatch).length;
@@ -573,7 +573,7 @@ function advanceGame(prev, bounds) {
       bubbles.push(makeBubble(player, target, nextId++, angleOffset));
     });
     soundEvents.push("shoot");
-    shootTimer += Math.max(0.36, 0.74 - score * 0.004);
+    shootTimer += Math.max(0.4, 0.82 - score * 0.003);
   }
 
   const hitBubbleIds = new Set();
