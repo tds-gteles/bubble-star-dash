@@ -98,6 +98,48 @@ const gameTypes = [
 const LEVEL_COUNT = 30;
 const categoryRotation = [0, 1, 2, 3, 4];
 const rewardNames = ["Bubble Badge", "Star Pop", "Word Spark", "Rainbow Ring", "Moon Sticker"];
+const DEFAULT_DIFFICULTY_ID = "normal";
+const difficultyModes = [
+  {
+    id: "easy",
+    label: "EASY",
+    title: "Easy",
+    color: colors.mint,
+    hearts: 4,
+    targetDelta: -2,
+    secondsDelta: 10,
+    cloudCapDelta: -1,
+    spawnDelta: 0.25,
+    speedDelta: -5,
+    matchChance: 0.74
+  },
+  {
+    id: "normal",
+    label: "NORMAL",
+    title: "Normal",
+    color: colors.yellow,
+    hearts: 3,
+    targetDelta: 0,
+    secondsDelta: 0,
+    cloudCapDelta: 0,
+    spawnDelta: 0,
+    speedDelta: 0,
+    matchChance: 0.58
+  },
+  {
+    id: "hard",
+    label: "HARD",
+    title: "Hard",
+    color: colors.coral,
+    hearts: 2,
+    targetDelta: 3,
+    secondsDelta: -8,
+    cloudCapDelta: 1,
+    spawnDelta: -0.22,
+    speedDelta: 5,
+    matchChance: 0.48
+  }
+];
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -120,22 +162,41 @@ function chooseWord(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-function makeLevelConfig(levelNumber, selectedCategoryIndex = MIXED_CATEGORY_INDEX) {
+function getDifficultyMode(difficultyId) {
+  return difficultyModes.find((mode) => mode.id === difficultyId) || difficultyModes[1];
+}
+
+function makeLevelConfig(
+  levelNumber,
+  selectedCategoryIndex = MIXED_CATEGORY_INDEX,
+  difficultyId = DEFAULT_DIFFICULTY_ID
+) {
   const safeLevel = clamp(Math.round(levelNumber) || 1, 1, LEVEL_COUNT);
   const levelIndex = safeLevel - 1;
+  const difficulty = getDifficultyMode(difficultyId);
   const categoryIndex =
     selectedCategoryIndex >= 0
       ? selectedCategoryIndex
       : categoryRotation[levelIndex % categoryRotation.length];
+  const baseTarget = 5 + Math.floor(levelIndex * 1.15);
+  const baseSeconds = 54 - Math.floor(levelIndex / 4) * 2;
+  const baseCloudCap = 4 + Math.min(4, Math.floor(levelIndex / 4));
+  const baseSpawn = 1.75 - levelIndex * 0.035;
+  const baseSpeed = Math.min(11, levelIndex * 0.55);
 
   return {
     levelNumber: safeLevel,
     categoryIndex,
-    targetScore: Math.min(26, 5 + Math.floor(levelIndex * 1.15)),
-    seconds: Math.max(34, 54 - Math.floor(levelIndex / 4) * 2),
-    cloudCap: 4 + Math.min(4, Math.floor(levelIndex / 4)),
-    spawnBase: Math.max(0.82, 1.75 - levelIndex * 0.035),
-    speedBonus: Math.min(11, levelIndex * 0.55),
+    difficultyId: difficulty.id,
+    difficultyLabel: difficulty.label,
+    difficultyColor: difficulty.color,
+    targetScore: clamp(baseTarget + difficulty.targetDelta, 3, 32),
+    seconds: clamp(baseSeconds + difficulty.secondsDelta, 26, 70),
+    hearts: difficulty.hearts,
+    cloudCap: clamp(baseCloudCap + difficulty.cloudCapDelta, 3, 10),
+    spawnBase: clamp(baseSpawn + difficulty.spawnDelta, 0.55, 2.25),
+    speedBonus: clamp(baseSpeed + difficulty.speedDelta, -5, 18),
+    matchChance: difficulty.matchChance,
     rewardName: rewardNames[levelIndex % rewardNames.length]
   };
 }
@@ -159,11 +220,19 @@ function getSelectedGameType(selectedCategoryIndex) {
   return gameTypes.find((type) => type.categoryIndex === selectedCategoryIndex) || mixedGameType;
 }
 
-function makeCloud(bounds, id, elapsed = 0, category = wordCategories[0], forceMatch = false, speedBonus = 0) {
+function makeCloud(
+  bounds,
+  id,
+  elapsed = 0,
+  category = wordCategories[0],
+  forceMatch = false,
+  speedBonus = 0,
+  matchChance = 0.58
+) {
   const { width, height } = normalizeBounds(bounds);
   const side = Math.floor(Math.random() * 4);
   const padding = 54;
-  const isMatch = forceMatch || Math.random() < 0.58;
+  const isMatch = forceMatch || Math.random() < matchChance;
   let x = Math.random() * width;
   let y = Math.random() * height;
 
@@ -224,25 +293,36 @@ function makeBubble(player, target, id, angleOffset = 0) {
   };
 }
 
-function createGame(bounds, status = "ready", selectedCategoryIndex = MIXED_CATEGORY_INDEX, levelNumber = 1) {
+function createGame(
+  bounds,
+  status = "ready",
+  selectedCategoryIndex = MIXED_CATEGORY_INDEX,
+  levelNumber = 1,
+  difficultyId = DEFAULT_DIFFICULTY_ID
+) {
   const safeBounds = normalizeBounds(bounds);
-  const level = makeLevelConfig(levelNumber, selectedCategoryIndex);
+  const level = makeLevelConfig(levelNumber, selectedCategoryIndex, difficultyId);
   const categoryIndex = resolveCategoryIndex(status, selectedCategoryIndex, level.levelNumber);
   const category = wordCategories[categoryIndex];
   const game = {
     status,
     levelNumber: level.levelNumber,
     categoryIndex,
+    difficultyId: level.difficultyId,
+    difficultyLabel: level.difficultyLabel,
+    difficultyColor: level.difficultyColor,
     targetScore: level.targetScore,
     duration: level.seconds,
+    maxHearts: level.hearts,
     cloudCap: level.cloudCap,
     spawnBase: level.spawnBase,
     speedBonus: level.speedBonus,
+    matchChance: level.matchChance,
     rewardName: level.rewardName,
     resultStars: 0,
     elapsed: 0,
     timeLeft: level.seconds,
-    hearts: 3,
+    hearts: level.hearts,
     score: 0,
     player: {
       x: safeBounds.width / 2,
@@ -260,8 +340,8 @@ function createGame(bounds, status = "ready", selectedCategoryIndex = MIXED_CATE
 
   if (status === "playing") {
     game.clouds = [
-      makeCloud(safeBounds, game.nextId++, 0, category, true, level.speedBonus),
-      makeCloud(safeBounds, game.nextId++, 0, category, false, level.speedBonus)
+      makeCloud(safeBounds, game.nextId++, 0, category, true, level.speedBonus, level.matchChance),
+      makeCloud(safeBounds, game.nextId++, 0, category, false, level.speedBonus, level.matchChance)
     ];
   }
 
@@ -345,7 +425,9 @@ function advanceGame(prev, bounds) {
   const cloudCap = Math.min(9, baseCloudCap + Math.min(2, Math.floor(elapsed / 20)));
   while (spawnTimer <= 0) {
     if (clouds.length < cloudCap) {
-      clouds.push(makeCloud(safeBounds, nextId++, elapsed, category, false, prev.speedBonus || 0));
+      clouds.push(
+        makeCloud(safeBounds, nextId++, elapsed, category, false, prev.speedBonus || 0, prev.matchChance || 0.58)
+      );
     }
     spawnTimer += Math.max(0.68, (prev.spawnBase || 1.65) - elapsed * 0.004);
   }
@@ -357,7 +439,9 @@ function advanceGame(prev, bounds) {
       clouds.splice(decoyIndex, 1);
     }
     if (clouds.length < cloudCap + 2) {
-      clouds.push(makeCloud(safeBounds, nextId++, elapsed, category, true, prev.speedBonus || 0));
+      clouds.push(
+        makeCloud(safeBounds, nextId++, elapsed, category, true, prev.speedBonus || 0, prev.matchChance || 0.58)
+      );
     }
   }
 
@@ -473,10 +557,10 @@ function GameButton({ label, onPress }) {
   );
 }
 
-function HeartRow({ hearts }) {
+function HeartRow({ hearts, maxHearts = 3 }) {
   return (
     <View style={styles.heartRow} accessibilityLabel={`${hearts} hearts`}>
-      {[0, 1, 2].map((index) => (
+      {Array.from({ length: maxHearts }).map((_, index) => (
         <View key={index} style={[styles.heart, index >= hearts && styles.heartEmpty]} />
       ))}
     </View>
@@ -552,6 +636,49 @@ function GameTypePicker({ visible, selectedCategoryIndex, onSelect, onClose }) {
                 >
                   <Text adjustsFontSizeToFit numberOfLines={1} style={styles.typeOptionText}>
                     {type.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function DifficultyPicker({ visible, selectedDifficultyId, onSelect, onClose }) {
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.typePanel}>
+          <View style={styles.typePanelHeader}>
+            <Text style={styles.typePanelTitle}>Difficulty</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onClose}
+              style={({ pressed }) => [styles.typeCloseButton, pressed && styles.pressedButton]}
+            >
+              <Text style={styles.typeCloseText}>X</Text>
+            </Pressable>
+          </View>
+          <View style={styles.typeGrid}>
+            {difficultyModes.map((mode) => {
+              const selected = mode.id === selectedDifficultyId;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  key={mode.id}
+                  onPress={() => onSelect(mode.id)}
+                  style={({ pressed }) => [
+                    styles.typeOption,
+                    { borderColor: mode.color },
+                    selected && styles.typeOptionSelected,
+                    pressed && styles.pressedButton
+                  ]}
+                >
+                  <Text adjustsFontSizeToFit numberOfLines={1} style={styles.typeOptionText}>
+                    {mode.label}
                   </Text>
                 </Pressable>
               );
@@ -759,7 +886,11 @@ export default function App() {
   const [levelStars, setLevelStars] = useState({});
   const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(MIXED_CATEGORY_INDEX);
   const [typePickerOpen, setTypePickerOpen] = useState(false);
-  const [game, setGame] = useState(() => createGame(fallbackBounds, "ready", MIXED_CATEGORY_INDEX, 1));
+  const [selectedDifficultyId, setSelectedDifficultyId] = useState(DEFAULT_DIFFICULTY_ID);
+  const [difficultyPickerOpen, setDifficultyPickerOpen] = useState(false);
+  const [game, setGame] = useState(() =>
+    createGame(fallbackBounds, "ready", MIXED_CATEGORY_INDEX, 1, DEFAULT_DIFFICULTY_ID)
+  );
   const gameRef = useRef(game);
   const awardedLevelRef = useRef(null);
 
@@ -777,9 +908,9 @@ export default function App() {
 
   useEffect(() => {
     if (gameRef.current.status === "ready") {
-      setGame(createGame(bounds, "ready", selectedCategoryIndex, currentLevel));
+      setGame(createGame(bounds, "ready", selectedCategoryIndex, currentLevel, selectedDifficultyId));
     }
-  }, [bounds, selectedCategoryIndex, currentLevel]);
+  }, [bounds, selectedCategoryIndex, currentLevel, selectedDifficultyId]);
 
   useEffect(() => {
     if (game.status !== "won" || awardedLevelRef.current === game.levelNumber) return;
@@ -828,9 +959,9 @@ export default function App() {
       const safeLevel = clamp(levelNumber, 1, LEVEL_COUNT);
       awardedLevelRef.current = null;
       setCurrentLevel(safeLevel);
-      setGame(createGame(bounds, "playing", selectedCategoryIndex, safeLevel));
+      setGame(createGame(bounds, "playing", selectedCategoryIndex, safeLevel, selectedDifficultyId));
     },
-    [bounds, selectedCategoryIndex]
+    [bounds, selectedCategoryIndex, selectedDifficultyId]
   );
 
   const runOverlayAction = useCallback(() => {
@@ -846,9 +977,19 @@ export default function App() {
       setSelectedCategoryIndex(categoryIndex);
       setTypePickerOpen(false);
       awardedLevelRef.current = null;
-      setGame(createGame(bounds, "ready", categoryIndex, currentLevel));
+      setGame(createGame(bounds, "ready", categoryIndex, currentLevel, selectedDifficultyId));
     },
-    [bounds, currentLevel]
+    [bounds, currentLevel, selectedDifficultyId]
+  );
+
+  const chooseDifficulty = useCallback(
+    (difficultyId) => {
+      setSelectedDifficultyId(difficultyId);
+      setDifficultyPickerOpen(false);
+      awardedLevelRef.current = null;
+      setGame(createGame(bounds, "ready", selectedCategoryIndex, currentLevel, difficultyId));
+    },
+    [bounds, currentLevel, selectedCategoryIndex]
   );
 
   const onStageLayout = useCallback(
@@ -865,6 +1006,7 @@ export default function App() {
   const roundedTime = Math.ceil(game.timeLeft);
   const category = wordCategories[game.categoryIndex] || wordCategories[0];
   const selectedGameType = getSelectedGameType(selectedCategoryIndex);
+  const selectedDifficulty = getDifficultyMode(selectedDifficultyId);
   const overlayVisible = game.status !== "playing";
   const overlayTitle =
     game.status === "won" ? "Level Clear!" : game.status === "rest" ? "Try again" : `Level ${currentLevel}`;
@@ -884,8 +1026,8 @@ export default function App() {
             <Text style={styles.kicker}>Bubble Star Dash</Text>
             <Text style={styles.title}>Word Garden</Text>
             <View style={styles.levelBadge}>
-              <Text style={styles.levelBadgeText}>
-                LEVEL {currentLevel}  {game.score}/{game.targetScore}  {roundedTime}s
+              <Text adjustsFontSizeToFit minimumFontScale={0.62} numberOfLines={1} style={styles.levelBadgeText}>
+                LEVEL {currentLevel}  {game.difficultyLabel}  {game.score}/{game.targetScore}  {roundedTime}s
               </Text>
             </View>
           </View>
@@ -905,7 +1047,22 @@ export default function App() {
               </Text>
               <Text style={styles.typeButtonArrow}>v</Text>
             </Pressable>
-            <HeartRow hearts={game.hearts} />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setDifficultyPickerOpen(true)}
+              style={({ pressed }) => [
+                styles.typeButton,
+                { borderColor: selectedDifficulty.color },
+                pressed && styles.pressedButton
+              ]}
+            >
+              <Text style={styles.typeButtonSmall}>DIFF</Text>
+              <Text adjustsFontSizeToFit numberOfLines={1} style={styles.typeButtonText}>
+                {selectedDifficulty.label}
+              </Text>
+              <Text style={styles.typeButtonArrow}>v</Text>
+            </Pressable>
+            <HeartRow hearts={game.hearts} maxHearts={game.maxHearts} />
           </View>
         </View>
 
@@ -961,12 +1118,16 @@ export default function App() {
               )}
               <View style={styles.goalCard}>
                 <Text style={styles.goalCardLabel}>GOAL</Text>
-                <Text style={styles.goalCardText}>
-                  {category.label} {game.score}/{game.targetScore}
+                <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={styles.goalCardText}>
+                  {category.label} {game.difficultyLabel} {game.score}/{game.targetScore}
                 </Text>
               </View>
               <LevelTrail currentLevel={currentLevel} levelStars={levelStars} unlockedLevel={unlockedLevel} />
-              {game.status !== "ready" && <Text style={styles.overlayTheme}>{category.label}</Text>}
+              {game.status !== "ready" && (
+                <Text style={styles.overlayTheme}>
+                  {category.label} / {game.difficultyLabel}
+                </Text>
+              )}
               <GameButton label={overlayButton} onPress={runOverlayAction} />
             </View>
           )}
@@ -976,6 +1137,12 @@ export default function App() {
           onSelect={chooseGameType}
           selectedCategoryIndex={selectedCategoryIndex}
           visible={typePickerOpen}
+        />
+        <DifficultyPicker
+          onClose={() => setDifficultyPickerOpen(false)}
+          onSelect={chooseDifficulty}
+          selectedDifficultyId={selectedDifficultyId}
+          visible={difficultyPickerOpen}
         />
       </View>
     </SafeAreaView>
@@ -998,7 +1165,7 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === "android" ? NativeStatusBar.currentHeight || 0 : 0,
     paddingHorizontal: 18,
     paddingBottom: 10,
-    minHeight: 92,
+    minHeight: 130,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
@@ -1010,7 +1177,7 @@ const styles = StyleSheet.create({
   },
   headerControls: {
     alignItems: "flex-end",
-    gap: 7,
+    gap: 5,
     paddingBottom: 2
   },
   kicker: {
@@ -1028,6 +1195,7 @@ const styles = StyleSheet.create({
   levelBadge: {
     alignSelf: "flex-start",
     marginTop: 4,
+    maxWidth: 190,
     minHeight: 22,
     borderRadius: 8,
     backgroundColor: "rgba(255,255,255,0.66)",
@@ -1041,9 +1209,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0
   },
   typeButton: {
-    height: 42,
-    minWidth: 122,
-    maxWidth: 142,
+    height: 34,
+    minWidth: 118,
+    maxWidth: 136,
     borderRadius: 8,
     borderWidth: 3,
     backgroundColor: colors.panel,
@@ -1055,14 +1223,14 @@ const styles = StyleSheet.create({
   },
   typeButtonSmall: {
     color: colors.softInk,
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "900",
     letterSpacing: 0
   },
   typeButtonText: {
     flexShrink: 1,
     color: colors.ink,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "900",
     letterSpacing: 0
   },
@@ -1079,7 +1247,7 @@ const styles = StyleSheet.create({
   heartRow: {
     flexDirection: "row",
     gap: 6,
-    paddingBottom: 4
+    paddingBottom: 0
   },
   heart: {
     width: 18,

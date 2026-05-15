@@ -15,6 +15,7 @@ Bubble Star Dash is a very light Expo React Native prototype for a child-friendl
 - Automatic bubble shots
 - Word-category rounds inspired by simple word puzzle games
 - Header game-type picker with Mix, colors, fruit, shapes, toys, and objects
+- Header difficulty picker with Easy, Normal, and Hard modes
 - Matching puffs for colors, fruit, shapes, toys, and everyday objects
 - 30 quick levels with rising word goals and shorter timers
 - One-tap next-level loop with three-star rewards
