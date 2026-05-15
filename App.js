@@ -331,7 +331,7 @@ function makeCloud(
 ) {
   const { width, height } = normalizeBounds(bounds);
   const side = Math.floor(Math.random() * 4);
-  const padding = 54;
+  const padding = 34;
   const isMatch = forceMatch || Math.random() < matchChance;
   let x = Math.random() * width;
   let y = Math.random() * height;
@@ -346,12 +346,19 @@ function makeCloud(
     x,
     y,
     radius: 20 + Math.random() * 9,
-    speed: 17 + Math.random() * 9 + Math.min(8, elapsed * 0.1) + speedBonus,
+    speed: 15 + Math.random() * 7 + Math.min(7, elapsed * 0.1) + speedBonus,
     wobble: Math.random() * Math.PI * 2,
     color: isMatch ? category.color : cloudColors[Math.floor(Math.random() * cloudColors.length)],
     isMatch,
     word: chooseWord(isMatch ? category.words : category.decoys)
   };
+}
+
+function isCloudVisible(cloud, bounds) {
+  const { width, height } = normalizeBounds(bounds);
+  const margin = cloud.radius * 0.35;
+
+  return cloud.x > margin && cloud.x < width - margin && cloud.y > margin && cloud.y < height - margin;
 }
 
 function makeStar(x, y, id) {
@@ -435,6 +442,8 @@ function createGame(
     spawnTimer: 0.35,
     shootTimer: 0.35,
     invincible: 0,
+    inputTimer: 0,
+    isPressing: false,
     soundEvents: [],
     nextId: 1
   };
@@ -462,8 +471,10 @@ function advanceGame(prev, bounds) {
   let score = prev.score;
   let hearts = prev.hearts;
   let invincible = Math.max(0, prev.invincible - dt);
+  let inputTimer = Math.max(0, (prev.inputTimer || 0) - dt);
   let spawnTimer = prev.spawnTimer - dt;
   let shootTimer = prev.shootTimer - dt;
+  const isFiring = prev.isPressing || inputTimer > 0;
   const soundEvents = [];
   let bursts = prev.bursts
     .map((burst) => ({ ...burst, radius: burst.radius + 54 * dt, life: burst.life - dt }))
@@ -548,9 +559,10 @@ function advanceGame(prev, bounds) {
     }
   }
 
-  if (shootTimer <= 0) {
-    const targetClouds = clouds.filter((cloud) => cloud.isMatch);
-    const aimClouds = targetClouds.length > 0 ? targetClouds : clouds;
+  if (shootTimer <= 0 && isFiring) {
+    const visibleClouds = clouds.filter((cloud) => isCloudVisible(cloud, safeBounds));
+    const targetClouds = visibleClouds.filter((cloud) => cloud.isMatch);
+    const aimClouds = targetClouds.length > 0 ? targetClouds : visibleClouds;
     const nearestCloud = aimClouds.reduce((nearest, cloud) => {
       const cloudDistance = distance(player, cloud);
       if (!nearest || cloudDistance < nearest.cloudDistance) {
@@ -559,21 +571,26 @@ function advanceGame(prev, bounds) {
       return nearest;
     }, null);
     const target = nearestCloud ? nearestCloud.cloud : null;
-    const bubbleCount = 1 + Math.min(3, Math.floor((score + prev.levelNumber) / 10));
-    const spread =
-      bubbleCount === 1
-        ? [0]
-        : bubbleCount === 2
-          ? [-0.18, 0.18]
-          : bubbleCount === 3
-            ? [-0.28, 0, 0.28]
-            : [-0.34, -0.12, 0.12, 0.34];
 
-    spread.forEach((angleOffset) => {
-      bubbles.push(makeBubble(player, target, nextId++, angleOffset));
-    });
-    soundEvents.push("shoot");
-    shootTimer += Math.max(0.4, 0.82 - score * 0.003);
+    if (target) {
+      const bubbleCount = 1 + Math.min(3, Math.floor((score + prev.levelNumber) / 10));
+      const spread =
+        bubbleCount === 1
+          ? [0]
+          : bubbleCount === 2
+            ? [-0.18, 0.18]
+            : bubbleCount === 3
+              ? [-0.28, 0, 0.28]
+              : [-0.34, -0.12, 0.12, 0.34];
+
+      spread.forEach((angleOffset) => {
+        bubbles.push(makeBubble(player, target, nextId++, angleOffset));
+      });
+      soundEvents.push("shoot");
+      shootTimer += Math.max(0.4, 0.82 - score * 0.003);
+    } else {
+      shootTimer = 0.12;
+    }
   }
 
   const hitBubbleIds = new Set();
@@ -653,6 +670,7 @@ function advanceGame(prev, bounds) {
     spawnTimer,
     shootTimer,
     invincible,
+    inputTimer,
     soundEvents,
     resultStars,
     nextId
@@ -1045,11 +1063,13 @@ export default function App() {
   }, [game.levelNumber, game.resultStars, game.status]);
 
   const movePlayerTo = useCallback(
-    (x, y) => {
+    (x, y, isPressing = true) => {
       setGame((previousGame) => {
         if (previousGame.status !== "playing") return previousGame;
         return {
           ...previousGame,
+          inputTimer: 0.65,
+          isPressing,
           player: {
             x: clamp(x, PLAYER_RADIUS + 4, bounds.width - PLAYER_RADIUS - 4),
             y: clamp(y, PLAYER_RADIUS + 4, bounds.height - PLAYER_RADIUS - 4)
@@ -1059,6 +1079,17 @@ export default function App() {
     },
     [bounds.height, bounds.width]
   );
+
+  const releasePlayerControl = useCallback(() => {
+    setGame((previousGame) => {
+      if (previousGame.status !== "playing") return previousGame;
+      return {
+        ...previousGame,
+        inputTimer: Math.max(previousGame.inputTimer || 0, 0.25),
+        isPressing: false
+      };
+    });
+  }, []);
 
   const panResponder = useMemo(
     () =>
@@ -1070,9 +1101,11 @@ export default function App() {
         },
         onPanResponderMove: (event) => {
           movePlayerTo(event.nativeEvent.locationX, event.nativeEvent.locationY);
-        }
+        },
+        onPanResponderRelease: releasePlayerControl,
+        onPanResponderTerminate: releasePlayerControl
       }),
-    [movePlayerTo]
+    [movePlayerTo, releasePlayerControl]
   );
 
   const beginLevel = useCallback(
