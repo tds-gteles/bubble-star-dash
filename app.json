@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Bubble Star Dash",
+    "slug": "bubble-star-dash",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#93E4FF"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#93E4FF"
+      }
+    }
+  }
+}
