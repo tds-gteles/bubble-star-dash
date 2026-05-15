@@ -141,6 +141,106 @@ const difficultyModes = [
   }
 ];
 
+function createRetroAudioEngine() {
+  let context = null;
+  let masterGain = null;
+
+  const getContext = () => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return null;
+    const AudioContextType = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextType) return null;
+
+    if (!context) {
+      context = new AudioContextType();
+      masterGain = context.createGain();
+      masterGain.gain.value = 0.16;
+      masterGain.connect(context.destination);
+    }
+
+    if (context.state === "suspended") {
+      context.resume().catch(() => {});
+    }
+
+    return context;
+  };
+
+  const beep = ({ frequency, duration = 0.08, delay = 0, type = "square", volume = 0.22, slideTo }) => {
+    const audioContext = getContext();
+    if (!audioContext || !masterGain) return;
+
+    const startTime = audioContext.currentTime + delay;
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, startTime);
+    if (slideTo) {
+      oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), startTime + duration);
+    }
+
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(volume, startTime + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+    oscillator.connect(gain);
+    gain.connect(masterGain);
+    oscillator.start(startTime);
+    oscillator.stop(startTime + duration + 0.03);
+  };
+
+  return {
+    play(effect) {
+      if (effect === "tap") {
+        beep({ frequency: 660, duration: 0.045, type: "triangle", volume: 0.14 });
+        beep({ frequency: 880, duration: 0.055, delay: 0.035, type: "triangle", volume: 0.12 });
+      } else if (effect === "select") {
+        beep({ frequency: 740, duration: 0.055, type: "square", volume: 0.13 });
+        beep({ frequency: 990, duration: 0.06, delay: 0.045, type: "triangle", volume: 0.13 });
+      } else if (effect === "start") {
+        [523, 659, 784, 1046].forEach((frequency, index) => {
+          beep({ frequency, duration: 0.075, delay: index * 0.055, type: "square", volume: 0.13 });
+        });
+      } else if (effect === "shoot") {
+        beep({ frequency: 820, duration: 0.035, type: "triangle", volume: 0.055, slideTo: 1180 });
+      } else if (effect === "pop") {
+        beep({ frequency: 620, duration: 0.07, type: "square", volume: 0.16, slideTo: 980 });
+        beep({ frequency: 1240, duration: 0.055, delay: 0.05, type: "triangle", volume: 0.11 });
+      } else if (effect === "collect") {
+        [880, 1175, 1568].forEach((frequency, index) => {
+          beep({ frequency, duration: 0.06, delay: index * 0.045, type: "square", volume: 0.12 });
+        });
+      } else if (effect === "wrong") {
+        beep({ frequency: 320, duration: 0.12, type: "sawtooth", volume: 0.07, slideTo: 230 });
+      } else if (effect === "hurt") {
+        beep({ frequency: 280, duration: 0.16, type: "square", volume: 0.12, slideTo: 140 });
+      } else if (effect === "win") {
+        [523, 659, 784, 1046, 1318].forEach((frequency, index) => {
+          beep({ frequency, duration: 0.105, delay: index * 0.075, type: "square", volume: 0.14 });
+        });
+      } else if (effect === "lose") {
+        [392, 330, 262].forEach((frequency, index) => {
+          beep({ frequency, duration: 0.13, delay: index * 0.095, type: "triangle", volume: 0.11 });
+        });
+      }
+    }
+  };
+}
+
+function useRetroSfx(enabled) {
+  const engineRef = useRef(null);
+
+  return useCallback(
+    (effect, options = {}) => {
+      if (!enabled && !options.force) return;
+      if (!engineRef.current) {
+        engineRef.current = createRetroAudioEngine();
+      }
+      engineRef.current.play(effect);
+    },
+    [enabled]
+  );
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -335,6 +435,7 @@ function createGame(
     spawnTimer: 0.35,
     shootTimer: 0.35,
     invincible: 0,
+    soundEvents: [],
     nextId: 1
   };
 
@@ -363,6 +464,7 @@ function advanceGame(prev, bounds) {
   let invincible = Math.max(0, prev.invincible - dt);
   let spawnTimer = prev.spawnTimer - dt;
   let shootTimer = prev.shootTimer - dt;
+  const soundEvents = [];
   let bursts = prev.bursts
     .map((burst) => ({ ...burst, radius: burst.radius + 54 * dt, life: burst.life - dt }))
     .filter((burst) => burst.life > 0);
@@ -416,6 +518,7 @@ function advanceGame(prev, bounds) {
   stars = stars.filter((star) => {
     if (distance(player, star) < PLAYER_RADIUS + star.radius + 8) {
       bursts.push(makeBurst(star.x, star.y, nextId++, colors.yellow));
+      soundEvents.push("collect");
       return false;
     }
     return true;
@@ -469,11 +572,14 @@ function advanceGame(prev, bounds) {
     spread.forEach((angleOffset) => {
       bubbles.push(makeBubble(player, target, nextId++, angleOffset));
     });
+    soundEvents.push("shoot");
     shootTimer += Math.max(0.36, 0.74 - score * 0.004);
   }
 
   const hitBubbleIds = new Set();
   const poppedStars = [];
+  let matchedWord = false;
+  let hitDecoy = false;
   const remainingClouds = [];
 
   clouds.forEach((cloud) => {
@@ -484,10 +590,12 @@ function advanceGame(prev, bounds) {
     if (hitBubble && cloud.isMatch) {
       hitBubbleIds.add(hitBubble.id);
       score += 1;
+      matchedWord = true;
       poppedStars.push(makeStar(cloud.x, cloud.y, nextId++));
       bursts.push(makeBurst(cloud.x, cloud.y, nextId++, cloud.color));
     } else if (hitBubble) {
       hitBubbleIds.add(hitBubble.id);
+      hitDecoy = true;
       remainingClouds.push(cloud);
       bursts.push(makeBurst(hitBubble.x, hitBubble.y, nextId++, colors.white));
     } else {
@@ -498,6 +606,8 @@ function advanceGame(prev, bounds) {
   clouds = remainingClouds;
   bubbles = bubbles.filter((bubble) => !hitBubbleIds.has(bubble.id));
   stars = stars.concat(poppedStars);
+  if (matchedWord) soundEvents.push("pop");
+  if (hitDecoy) soundEvents.push("wrong");
 
   if (invincible <= 0) {
     let bumped = false;
@@ -513,6 +623,7 @@ function advanceGame(prev, bounds) {
     if (bumped) {
       hearts = Math.max(0, hearts - 1);
       invincible = 1.25;
+      soundEvents.push("hurt");
     }
   }
 
@@ -521,8 +632,10 @@ function advanceGame(prev, bounds) {
   if (score >= prev.targetScore) {
     status = "won";
     resultStars = getEarnedStars(hearts, timeLeft, prev.duration || GAME_SECONDS);
+    soundEvents.push("win");
   } else if (hearts <= 0 || timeLeft <= 0) {
     status = "rest";
+    soundEvents.push("lose");
   }
 
   return {
@@ -540,6 +653,7 @@ function advanceGame(prev, bounds) {
     spawnTimer,
     shootTimer,
     invincible,
+    soundEvents,
     resultStars,
     nextId
   };
@@ -888,15 +1002,22 @@ export default function App() {
   const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [selectedDifficultyId, setSelectedDifficultyId] = useState(DEFAULT_DIFFICULTY_ID);
   const [difficultyPickerOpen, setDifficultyPickerOpen] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
   const [game, setGame] = useState(() =>
     createGame(fallbackBounds, "ready", MIXED_CATEGORY_INDEX, 1, DEFAULT_DIFFICULTY_ID)
   );
   const gameRef = useRef(game);
   const awardedLevelRef = useRef(null);
+  const playSfx = useRetroSfx(soundOn);
 
   useEffect(() => {
     gameRef.current = game;
   }, [game]);
+
+  useEffect(() => {
+    if (!game.soundEvents || game.soundEvents.length === 0) return;
+    game.soundEvents.forEach((effect) => playSfx(effect));
+  }, [game.soundEvents, playSfx]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -957,11 +1078,12 @@ export default function App() {
   const beginLevel = useCallback(
     (levelNumber) => {
       const safeLevel = clamp(levelNumber, 1, LEVEL_COUNT);
+      playSfx("start");
       awardedLevelRef.current = null;
       setCurrentLevel(safeLevel);
       setGame(createGame(bounds, "playing", selectedCategoryIndex, safeLevel, selectedDifficultyId));
     },
-    [bounds, selectedCategoryIndex, selectedDifficultyId]
+    [bounds, playSfx, selectedCategoryIndex, selectedDifficultyId]
   );
 
   const runOverlayAction = useCallback(() => {
@@ -974,23 +1096,52 @@ export default function App() {
 
   const chooseGameType = useCallback(
     (categoryIndex) => {
+      playSfx("select");
       setSelectedCategoryIndex(categoryIndex);
       setTypePickerOpen(false);
       awardedLevelRef.current = null;
       setGame(createGame(bounds, "ready", categoryIndex, currentLevel, selectedDifficultyId));
     },
-    [bounds, currentLevel, selectedDifficultyId]
+    [bounds, currentLevel, playSfx, selectedDifficultyId]
   );
 
   const chooseDifficulty = useCallback(
     (difficultyId) => {
+      playSfx("select");
       setSelectedDifficultyId(difficultyId);
       setDifficultyPickerOpen(false);
       awardedLevelRef.current = null;
       setGame(createGame(bounds, "ready", selectedCategoryIndex, currentLevel, difficultyId));
     },
-    [bounds, currentLevel, selectedCategoryIndex]
+    [bounds, currentLevel, playSfx, selectedCategoryIndex]
   );
+
+  const openTypePicker = useCallback(() => {
+    playSfx("tap");
+    setTypePickerOpen(true);
+  }, [playSfx]);
+
+  const closeTypePicker = useCallback(() => {
+    playSfx("tap");
+    setTypePickerOpen(false);
+  }, [playSfx]);
+
+  const openDifficultyPicker = useCallback(() => {
+    playSfx("tap");
+    setDifficultyPickerOpen(true);
+  }, [playSfx]);
+
+  const closeDifficultyPicker = useCallback(() => {
+    playSfx("tap");
+    setDifficultyPickerOpen(false);
+  }, [playSfx]);
+
+  const toggleSound = useCallback(() => {
+    if (!soundOn) {
+      playSfx("start", { force: true });
+    }
+    setSoundOn((enabled) => !enabled);
+  }, [playSfx, soundOn]);
 
   const onStageLayout = useCallback(
     (event) => {
@@ -1034,7 +1185,7 @@ export default function App() {
           <View style={styles.headerControls}>
             <Pressable
               accessibilityRole="button"
-              onPress={() => setTypePickerOpen(true)}
+              onPress={openTypePicker}
               style={({ pressed }) => [
                 styles.typeButton,
                 { borderColor: selectedGameType.color },
@@ -1049,7 +1200,7 @@ export default function App() {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              onPress={() => setDifficultyPickerOpen(true)}
+              onPress={openDifficultyPicker}
               style={({ pressed }) => [
                 styles.typeButton,
                 { borderColor: selectedDifficulty.color },
@@ -1062,7 +1213,22 @@ export default function App() {
               </Text>
               <Text style={styles.typeButtonArrow}>v</Text>
             </Pressable>
-            <HeartRow hearts={game.hearts} maxHearts={game.maxHearts} />
+            <View style={styles.statusRow}>
+              <HeartRow hearts={game.hearts} maxHearts={game.maxHearts} />
+              <Pressable
+                accessibilityLabel={soundOn ? "Sound effects on" : "Sound effects off"}
+                accessibilityRole="button"
+                onPress={toggleSound}
+                style={({ pressed }) => [
+                  styles.soundButton,
+                  !soundOn && styles.soundButtonMuted,
+                  pressed && styles.pressedButton
+                ]}
+              >
+                <Text style={styles.soundButtonLabel}>SFX</Text>
+                <Text style={styles.soundButtonText}>{soundOn ? "ON" : "OFF"}</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
 
@@ -1134,13 +1300,13 @@ export default function App() {
           )}
         </View>
         <GameTypePicker
-          onClose={() => setTypePickerOpen(false)}
+          onClose={closeTypePicker}
           onSelect={chooseGameType}
           selectedCategoryIndex={selectedCategoryIndex}
           visible={typePickerOpen}
         />
         <DifficultyPicker
-          onClose={() => setDifficultyPickerOpen(false)}
+          onClose={closeDifficultyPicker}
           onSelect={chooseDifficulty}
           selectedDifficultyId={selectedDifficultyId}
           visible={difficultyPickerOpen}
@@ -1180,6 +1346,12 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     gap: 5,
     paddingBottom: 2
+  },
+  statusRow: {
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
   },
   kicker: {
     color: colors.softInk,
@@ -1261,6 +1433,35 @@ const styles = StyleSheet.create({
   heartEmpty: {
     opacity: 0.25,
     backgroundColor: colors.softInk
+  },
+  soundButton: {
+    height: 28,
+    minWidth: 64,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.white,
+    backgroundColor: colors.yellow,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingHorizontal: 8
+  },
+  soundButtonMuted: {
+    backgroundColor: "rgba(255,255,255,0.62)",
+    borderColor: "rgba(255,255,255,0.82)"
+  },
+  soundButtonLabel: {
+    color: colors.softInk,
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  soundButtonText: {
+    color: colors.ink,
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0
   },
   rewardStars: {
     flexDirection: "row",
