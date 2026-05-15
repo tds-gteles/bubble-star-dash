@@ -1110,6 +1110,7 @@ export default function App() {
               </View>
               <Text style={styles.overlayTitle}>{overlayTitle}</Text>
               <Text style={styles.overlayCaption}>{overlayCaption}</Text>
+              <Text style={styles.testNote}>Test build only. Not a real game.</Text>
               {game.status === "won" && (
                 <>
                   <RewardStars count={game.resultStars} />
@@ -1757,6 +1758,19 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontSize: 18,
     fontWeight: "800",
+    textAlign: "center",
+    letterSpacing: 0
+  },
+  testNote: {
+    marginBottom: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    overflow: "hidden",
+    color: colors.softInk,
+    backgroundColor: "rgba(255,255,255,0.56)",
+    fontSize: 13,
+    fontWeight: "900",
     textAlign: "center",
     letterSpacing: 0
   },
